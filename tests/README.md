@@ -10,6 +10,9 @@ python3.7 -m venv venv/
 # install requirements
 venv/bin/pip install -r requirements.txt
 
+# generate sql
+venv/bin/python script/generate_sql
+
 # run pytest with all linters and 4 workers in parallel
 venv/bin/pytest --black --docstyle --flake8 --mypy-ignore-missing-imports -n 4
 ```
