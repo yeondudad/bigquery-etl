@@ -210,6 +210,7 @@ SELECT
   udf_json_mode_last(ARRAY_AGG(STRUCT(udf_null_if_empty_list(environment_settings_intl_system_locales) AS list) ORDER BY `timestamp`)).list AS environment_settings_intl_system_locales,
   udf_json_mode_last(ARRAY_AGG(STRUCT(udf_null_if_empty_list(environment_settings_intl_regional_prefs_locales) AS list) ORDER BY `timestamp`)).list AS environment_settings_intl_regional_prefs_locales,
   udf_map_mode_last(ARRAY_CONCAT_AGG(experiments ORDER BY `timestamp`)) AS experiments,
+  udf_map_mode_last(ARRAY_CONCAT_AGG(experiments_details ORDER BY `timestamp`)) AS experiments_details,
   AVG(first_paint) AS first_paint_mean,
   udf_mode_last(ARRAY_AGG(flash_version ORDER BY `timestamp`)) AS flash_version,
   udf_json_mode_last(ARRAY_AGG(udf_geo_struct(country, city, geo_subdivision1, geo_subdivision2) ORDER BY `timestamp`)).*,
