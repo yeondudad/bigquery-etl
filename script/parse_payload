@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+
+from uuid import uuid4
+import re
+
+from google.cloud import bigquery
+
+client = bigquery.Client()
+temporary_dataset = None
+
+
+def get_temporary_dataset(client=client):
+    """Get a cached reference to the dataset used for server-assigned destinations."""
+    global temporary_dataset
+    if temporary_dataset is None:
+        # look up the dataset used for query results without a destination
+        dry_run = bigquery.QueryJobConfig(dry_run=True)
+        destination = client.query("SELECT 1", dry_run).destination
+        temporary_dataset = client.dataset(destination.dataset_id, destination.project)
+    return temporary_dataset
+
+
+def rtype(field):
+    if field.field_type == "RECORD":
+        typ = "STRUCT<" + ",".join(rtype(f) for f in field.fields) + ">"
+    elif field.field_type == "BOOLEAN":
+        typ = "BOOL"
+    elif field.field_type == "FLOAT":
+        typ = "FLOAT64"
+    elif field.field_type == "INTEGER":
+        typ = "INT64"
+    else:
+        typ = field.field_type
+    if field.mode == "REPEATED":
+        typ = f"ARRAY<{typ}>"
+    return f"`{field.name}` {typ}"
+
+
+SOURCE_RE = re.compile(r"([^.]+)\.payload_bytes_decoded\.(?:stub_)?[^_]+_(.*)__(.*)")
+
+
+def generate_udf(source_table):
+    project, dataset, table = SOURCE_RE.match(source_table).groups()
+    dest = client.get_table(f"{project}.{dataset}_stable.{table}")
+    return_type = "STRUCT<" + ",".join(rtype(f) for f in dest.schema) + ">"
+    return (
+        "CREATE TEMP FUNCTION udf_js_parse_payload(payload BYTES) "
+        f"RETURNS {return_type} "
+        'LANGUAGE js AS "return parsePayload(payload);" '
+        "OPTIONS ("
+        'library="gs://moz-fx-data-circleci-tests-bigquery-etl/gunzip.min.js",'
+        'library="gs://moz-fx-data-circleci-tests-bigquery-etl/atob.js",'
+        'library="gs://moz-fx-data-circleci-tests-bigquery-etl/parsePayload.js"'
+        ");"
+    )
+
+source_table = "moz-fx-data-shared-prod.payload_bytes_decoded.telemetry_telemetry__main_v4"
+dedup = f"""WITH
+  distinct_docs AS (
+    SELECT
+      document_id,
+      MIN(submission_timestamp) AS submission_timestamp
+    FROM
+      `{source_table}`
+    WHERE
+      DATE(submission_timestamp) = @submission_date
+    GROUP BY
+      document_id
+  ),
+  base AS (
+    SELECT
+      *,
+      ROW_NUMBER() OVER (PARTITION BY document_id) AS _n
+    FROM
+      `{source_table}` AS source
+    JOIN
+      distinct_docs
+    USING
+      (document_id, submission_timestamp)
+    WHERE
+      DATE(source.submission_timestamp) = @submission_date
+  )
+SELECT
+  *
+FROM
+  base
+WHERE
+  _n = 1"""
+query_parameters = [bigquery.ScalarQueryParameter("submission_date", "DATE", "2019-12-11")]
+temp_table = get_temporary_dataset().table(f"anon{uuid4().hex}")
+dedup_job = client.query(dedup, bigquery.QueryJobConfig(destination=temp_table, query_parameters=query_parameters))
+dedup_job.result()
+dedup_table = f"{temp_table.project}.{temp_table.dataset_id}.{temp_table.table_id}"
+
+query = (
+    f"{generate_udf(source_table)}"
+    f"SELECT udf_js_parse_payload(payload).* FROM `{source_table}` "
+    "WHERE DATE(submission_timestamp) = @submission_date"
+)
+job = client.query(query, bigquery.QueryJobConfig(destination="relud-17123.test.main_v4", time_partitioning=bigquery.TimePartitioning(field="submission_timestamp"), clustering_fields=["normalized_channel","sample_id"], query_parameters=query_parameters))
+try: job.result()
+except Exception as e: e
+
+len(query)
