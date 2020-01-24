@@ -21,8 +21,6 @@ WITH
       COUNTIF(histogram_parent_devtools_computedview_opened_count_sum > 0) AS dau),
     STRUCT('custom' AS tool,
       COUNTIF(histogram_parent_devtools_custom_opened_count_sum > 0) AS dau),
-    STRUCT('developertoolbar' AS tool,
-      COUNTIF(histogram_parent_devtools_developertoolbar_opened_count_sum > 0) AS dau),
     STRUCT('dom' AS tool,
       COUNTIF(histogram_parent_devtools_dom_opened_count_sum > 0) AS dau),
     STRUCT('eyedropper' AS tool,
